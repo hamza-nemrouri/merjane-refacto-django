@@ -1,31 +1,24 @@
-from datetime import date, timedelta
+from datetime import date
+
 from ...repositories.product_repository import pr
+from ..product_rules import ExpirableProductRule, SeasonalProductRule, announce_delay, rule_for
 from .notification_service import ns
 
+
 class ProductService:
-    def notify_delay(self, lead_time, p):
-        p.lead_time = lead_time
-        pr.save(p)
-        ns.send_delay_notification(lead_time, p.name)
+    def handle(self, product, today=None):
+        rule_for(product.type, pr, ns, today or date.today()).apply(product)
 
-    def handle_seasonal_product(self, p):
-        if date.today() + timedelta(days=p.lead_time) > p.season_end_date:
-            ns.send_out_of_stock_notification(p.name)
-            p.available = 0
-            pr.save(p)
-        elif p.season_start_date > date.today():
-            ns.send_out_of_stock_notification(p.name)
-            pr.save(p)
-        else:
-            self.notify_delay(p.lead_time, p)
+    # The original API. Kept for existing callers, and it delegates to the rules.
+    def notify_delay(self, lead_time, product):
+        product.lead_time = lead_time
+        announce_delay(pr, ns, product)
 
-    def handle_expired_product(self, p):
-        if p.available > 0 and p.expiry_date > date.today():
-            p.available -= 1
-            pr.save(p)
-        else:
-            p.available = 0
-            pr.save(p)
-            ns.send_expiry_notification(p.name)
+    def handle_seasonal_product(self, product, today=None):
+        SeasonalProductRule(pr, ns, today or date.today()).handle_out_of_stock(product)
+
+    def handle_expired_product(self, product, today=None):
+        ExpirableProductRule(pr, ns, today or date.today()).handle_unsellable(product)
+
 
 ps = ProductService()
